@@ -2,6 +2,7 @@
 - name: Gather facts
   setup:
 - name: Cloud only tasks
+  when: algo_provider != "local"
   block:
     - name: Install software updates
       apt:
@@ -29,6 +30,7 @@
       args:
         executable: /bin/bash
       register: reboot_required
+      changed_when: false
 
     - name: Reboot (kernel updated or performance optimization disabled)
       shell: sleep 2 && shutdown -r now "Ansible updates triggered"
@@ -39,6 +41,7 @@
           reboot_required.stdout == 'kernel-updated' or
           (reboot_required.stdout == 'optional' and not performance_skip_optional_reboots|default(false))
         )
+      changed_when: true
       failed_when: false
 
     - name: Skip reboot (performance optimization enabled)
@@ -59,7 +62,6 @@
           (reboot_required.stdout == 'optional' and not performance_skip_optional_reboots|default(false))
         )
       become: false
-  when: algo_provider != "local"
 
 - name: Include unattended upgrades configuration
   import_tasks: unattended-upgrades.yml
@@ -67,7 +69,7 @@
 - name: Disable MOTD on login and SSHD
   replace: dest="{{ item.file }}" regexp="{{ item.regexp }}" replace="{{ item.line }}"
   become: true
-  with_items:
+  loop:
     - { regexp: ^session.*optional.*pam_motd.so.*, line: "# MOTD DISABLED", file: /etc/pam.d/login }
     - { regexp: ^session.*optional.*pam_motd.so.*, line: "# MOTD DISABLED", file: /etc/pam.d/sshd }
 
@@ -95,7 +97,7 @@
     state: started
     enabled: true
     daemon_reload: true
-  with_items:
+  loop:
     - systemd-networkd
     - systemd-resolved
 
@@ -103,7 +105,7 @@
 
 - name: Check apparmor support
   command: apparmor_status
-  ignore_errors: true
+  failed_when: false
   changed_when: false
   register: apparmor_status
 
@@ -129,7 +131,8 @@
       - openssl
       - gnupg2
       - cron
-    sysctl: "{{ [{'item': 'net.ipv4.ip_forward', 'value': 1}, {'item': 'net.ipv4.conf.all.forwarding', 'value': 1}, {'item': 'net.ipv4.conf.all.route_localnet', 'value': 1}] + ([{'item': 'net.ipv6.conf.all.forwarding', 'value': 1}] if ipv6_support else []) }}"
+    # yamllint disable-line rule:line-length
+    sysctl: "{{ [{'item': 'net.ipv4.ip_forward', 'value': 1}, {'item': 'net.ipv4.conf.all.forwarding', 'value': 1}, {'item': 'net.ipv4.conf.all.route_localnet', 'value': 1}] + ([{'item': 'net.ipv6.conf.all.forwarding', 'value': 1}] if ipv6_support | bool else []) }}"
 
 - name: Install packages (batch optimization)
   include_tasks: packages.yml
@@ -156,9 +159,11 @@
 
 - name: Configure the alternative ingress ip
   include_tasks: aip/main.yml
-  when: alternative_ingress_ip
+  when: alternative_ingress_ip | bool
 
 - name: Ubuntu 22.04+ | Use iptables-legacy for compatibility
+  when: is_ubuntu_22_plus
+  tags: iptables
   block:
     - name: Install iptables packages
       apt:
@@ -172,13 +177,9 @@
       alternatives:
         name: "{{ item }}"
         path: "/usr/sbin/{{ item }}-legacy"
-      with_items:
+      loop:
         - iptables
         - ip6tables
-  when:
-    - ansible_distribution == "Ubuntu"
-    - ansible_distribution_version is version('22.04', '>=')
-  tags: iptables
 
 - include_tasks: iptables.yml
   tags: iptables

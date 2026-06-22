@@ -1,5 +1,10 @@
 ---
-- block:
+- become: false
+  delegate_to: localhost
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+    certificate_validity_days: 3650  # 10 years - configurable certificate lifespan
+  block:
     - debug: var=subjectAltName
 
     - name: Ensure the pki directory does not exist
@@ -14,7 +19,7 @@
         state: directory
         recurse: true
         mode: "0700"
-      with_items:
+      loop:
         - certs
         - private
         - public
@@ -25,7 +30,7 @@
         state: directory
         recurse: true
         mode: "0700"
-      with_items:
+      loop:
         - apple
         - manual
 
@@ -68,7 +73,7 @@
             'DNS:' + openssl_constraint_random_id,
             'email:' + openssl_constraint_random_id
           ] + (
-            ['IP:' + ansible_default_ipv6['address'] + '/128'] if ipv6_support else []
+            ['IP:' + ansible_default_ipv6['address'] + '/128'] if ipv6_support | bool else []
           ) }}
         # Block public domains/networks to prevent certificate abuse for impersonation attacks
         # Public TLD exclusion, Email domain exclusion, RFC 1918: prevents lateral movement
@@ -79,7 +84,7 @@
             'email:.com', 'email:.org', 'email:.net', 'email:.gov', 'email:.edu', 'email:.mil', 'email:.int',
             'IP:10.0.0.0/255.0.0.0', 'IP:172.16.0.0/255.240.0.0', 'IP:192.168.0.0/255.255.0.0'
           ] + (
-            ['IP:fc00::/7', 'IP:fe80::/10', 'IP:2001:db8::/32'] if ipv6_support else ['IP:::/0']
+            ['IP:fc00::/7', 'IP:fe80::/10', 'IP:2001:db8::/32'] if ipv6_support | bool else ['IP:::/0']
           ) }}
         name_constraints_critical: true
       register: ca_csr
@@ -106,9 +111,7 @@
         type: ECC
         curve: secp384r1
         mode: "0600"
-      with_items:
-        - "{{ users }}"
-        - "{{ IP_subject_alt_name }}"
+      loop: "{{ users + [IP_subject_alt_name] }}"
       register: client_key_jobs
 
     # Server certificate with SAN extension - required for modern Apple devices
@@ -153,7 +156,7 @@
           - clientAuth                    # Client Authentication (RFC 5280)
           - '1.3.6.1.5.5.7.3.17'        # IPsec End Entity (RFC 4945)
         extended_key_usage_critical: false
-      with_items: "{{ users }}"
+      loop: "{{ users }}"
       register: client_csr_jobs
 
     - name: Sign server certificate with CA
@@ -180,7 +183,7 @@
         ownca_not_after: "+{{ certificate_validity_days }}d"
         ownca_not_before: "-1d"
         mode: "0644"
-      with_items: "{{ client_csr_jobs.results }}"
+      loop: "{{ client_csr_jobs.results }}"
       register: client_sign_results
       no_log: true
 
@@ -193,7 +196,7 @@
         passphrase: "{{ p12_export_password }}"
         mode: "0600"
         encryption_level: "compatibility2022"  # Apple device compatibility
-      with_items: "{{ users }}"
+      loop: "{{ users }}"
       no_log: true
 
     - name: Generate p12 files with CA certificate included
@@ -207,7 +210,7 @@
         passphrase: "{{ p12_export_password }}"
         mode: "0600"
         encryption_level: "compatibility2022"  # Apple device compatibility
-      with_items: "{{ users }}"
+      loop: "{{ users }}"
       no_log: true
 
     - name: Copy the p12 certificates
@@ -215,15 +218,14 @@
         src: "{{ ipsec_pki_path }}/private/{{ item }}.p12"
         dest: "{{ ipsec_config_path }}/manual/{{ item }}.p12"
         mode: '0600'
-      with_items:
-        - "{{ users }}"
+      loop: "{{ users }}"
 
     - name: Build openssh public keys
       community.crypto.openssl_publickey:
         path: "{{ ipsec_pki_path }}/public/{{ item }}.pub"
         privatekey_path: "{{ ipsec_pki_path }}/private/{{ item }}.key"
         format: OpenSSH
-      with_items: "{{ users }}"
+      loop: "{{ users }}"
 
     - name: Add all users to the file
       ansible.builtin.lineinfile:
@@ -231,7 +233,7 @@
         line: "{{ item }}"
         mode: '0644'
         create: true
-      with_items: "{{ users }}"
+      loop: "{{ users }}"
       register: users_file
 
     - name: Set all users as a fact
@@ -270,11 +272,6 @@
       file:
         path: "{{ ipsec_pki_path }}/crl.pem"
         mode: "0644"
-  delegate_to: localhost
-  become: false
-  vars:
-    ansible_python_interpreter: "{{ ansible_playbook_python }}"
-    certificate_validity_days: 3650  # 10 years - configurable certificate lifespan
 
 - name: Copy the CRL to the vpn server
   copy:

@@ -1,7 +1,10 @@
 ---
 name: Lint
 
-'on': [push, pull_request]
+'on':
+  push:
+    branches: [main, master]
+  pull_request:
 
 permissions:
   contents: read
@@ -11,18 +14,14 @@ jobs:
     name: Ansible linting
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
+
+      - name: Setup Algo environment
+        uses: ./.github/actions/setup-algo
         with:
-          python-version: '3.11'
-
-      - name: Setup uv environment
-        uses: ./.github/actions/setup-uv
-
-      - name: Install Ansible collections
-        run: uv run --with ansible-lint --with ansible ansible-galaxy collection install -r requirements.yml
+          install-ansible-collections: 'true'
 
       - name: Run ansible-lint
         run: |
@@ -42,7 +41,7 @@ jobs:
     name: YAML linting
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           persist-credentials: false
 
@@ -52,36 +51,80 @@ jobs:
       - name: Run yamllint
         run: uv run --with yamllint yamllint -c .yamllint .
 
-  python-lint:
-    name: Python linting
+  jinja2-lint:
+    name: Jinja2 template linting
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           persist-credentials: false
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c  # v6.0.0
-        with:
-          python-version: '3.11'
 
       - name: Setup uv environment
         uses: ./.github/actions/setup-uv
 
-      - name: Run ruff
+      - name: Run j2lint
+        run: |
+          # Lint Jinja2 templates for syntax and style issues
+          # Ignored rules (incompatible with Ansible config-file templates):
+          #   S3: indentation (dictated by output format, not Jinja style)
+          #   S5: tabs (some config formats require them)
+          #   S6: whitespace-control delimiters ({%- -%} are standard Ansible)
+          #   S7: single-statement-per-line (inline Jinja in config output)
+          #   V1: lowercase variables (existing names like IP_subject_alt_name)
+          uv run --with j2lint j2lint roles/ --ignore S3 S5 S6 S7 V1
+
+  python-lint:
+    name: Python linting
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Algo environment
+        uses: ./.github/actions/setup-algo
+
+      - name: Run ruff check
         run: |
           # Fast Python linter
           uv run --with ruff ruff check .
+
+      - name: Run ruff format check
+        run: |
+          # Verify consistent Python formatting
+          uv run --with ruff ruff format --check .
+
+  python-types:
+    name: Python type checking
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Setup Algo environment
+        uses: ./.github/actions/setup-algo
+
+      - name: Run ty check
+        run: |
+          # Type checking with ty
+          uv run --with ty ty check
 
   shellcheck:
     name: Shell script linting
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           persist-credentials: false
 
+      - name: Setup Algo environment
+        uses: ./.github/actions/setup-algo
+        with:
+          install-shellcheck: 'true'
+
       - name: Run shellcheck
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
           # Check all shell scripts, not just algo and install.sh
           find . -type f -name "*.sh" -not -path "./.git/*" -exec shellcheck {} \;
 
@@ -89,7 +132,7 @@ jobs:
     name: PowerShell script linting
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
         with:
           persist-credentials: false
 
@@ -128,3 +171,36 @@ jobs:
               Write-Host '✓ PSScriptAnalyzer check passed'
             }
           "
+
+  actionlint:
+    name: GitHub Actions linting
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          bash <(curl -sL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          sudo mv actionlint /usr/local/bin/
+
+      - name: Run actionlint
+        run: |
+          actionlint .github/workflows/*.yml
+
+  zizmor:
+    name: GitHub Actions security audit
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install zizmor
+        run: |
+          pip install zizmor
+
+      - name: Run zizmor
+        run: |
+          zizmor .github/workflows/

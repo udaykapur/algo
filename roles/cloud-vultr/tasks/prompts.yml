@@ -29,10 +29,7 @@
 
 - name: Format regions
   set_fact:
-    regions: >-
-      [ {% for v in _vultr_regions.json['regions'] %}
-      {{ v }}{% if not loop.last %},{% endif %}
-      {% endfor %} ]
+    regions: "{{ _vultr_regions.json['regions'] }}"
 
 - name: Set regions as a fact
   set_fact:
@@ -58,4 +55,12 @@
 - name: Set the desired region as a fact
   set_fact:
     algo_vultr_region: >-
-      {%- if region is defined -%}{{ region }}{%- elif _algo_region.user_input -%}{{ vultr_regions[_algo_region.user_input | int - 1]['id'] }}{%- else -%}{{ vultr_regions[default_region | int - 1]['id'] }}{%- endif -%}
+      {%- if region is defined -%}{{ region }}{%-
+      elif _algo_region.user_input -%}{{ vultr_regions[_algo_region.user_input | int - 1]['id'] }}{%-
+      else -%}{{ vultr_regions[default_region | int - 1]['id'] }}{%-
+      endif -%}
+    algo_region: >-
+      {%- if region is defined -%}{{ region }}{%-
+      elif _algo_region.user_input -%}{{ vultr_regions[_algo_region.user_input | int - 1]['id'] }}{%-
+      else -%}{{ vultr_regions[default_region | int - 1]['id'] }}{%-
+      endif -%}

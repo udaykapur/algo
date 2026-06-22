@@ -30,10 +30,13 @@ RUN uv sync --locked --no-dev
 # Copy application code
 COPY . .
 
+# Install Ansible Galaxy collections for cloud provider modules
+RUN uv run ansible-galaxy collection install -r requirements.yml
+
 # Set executable permissions and prepare runtime
+# Note: /algo must remain root-owned for --cap-drop=all compatibility
+# (root without CAP_DAC_OVERRIDE cannot write to files owned by others)
 RUN chmod 0755 /algo/algo-docker.sh && \
-    chown -R algo:algo /algo && \
-    # Create volume mount point with correct ownership
     mkdir -p /data && \
     chown algo:algo /data
 

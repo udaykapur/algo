@@ -2,7 +2,13 @@
 - name: Include prompts
   import_tasks: prompts.yml
 
-- block:
+- environment:
+    VULTR_API_KEY: "{{ lookup('ini', 'key', section='default', file=algo_vultr_config) }}"
+  block:
+    - name: Set cloud-init script as fact
+      set_fact:
+        algo_cloud_init_script: "{{ lookup('template', 'files/cloud-init/base.yml') }}"
+
     - name: Creating a firewall group
       vultr.cloud.firewall_group:
         name: "{{ algo_server_name }}"
@@ -15,7 +21,7 @@
         ip_type: "{{ item.ip }}"
         subnet: "{{ item.cidr.split('/')[0] }}"
         subnet_size: "{{ item.cidr.split('/')[1] }}"
-      with_items:
+      loop:
         - { protocol: tcp, port: "{{ ssh_port }}", ip: v4, cidr: 0.0.0.0/0 }
         - { protocol: tcp, port: "{{ ssh_port }}", ip: v6, cidr: "::/0" }
         - { protocol: udp, port: 500, ip: v4, cidr: 0.0.0.0/0 }
@@ -28,8 +34,7 @@
     - name: Upload the startup script
       vultr.cloud.startup_script:
         name: algo-startup
-        script: |
-          {{ lookup('template', 'files/cloud-init/base.yml') }}
+        script: "{{ algo_cloud_init_script }}"
 
     - name: Creating a server
       vultr.cloud.instance:
@@ -53,6 +58,3 @@
         ansible_ssh_user: algo
         ansible_ssh_port: "{{ ssh_port }}"
         cloudinit: true
-
-  environment:
-    VULTR_API_KEY: "{{ lookup('ini', 'key', section='default', file=algo_vultr_config) }}"

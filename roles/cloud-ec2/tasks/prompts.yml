@@ -6,7 +6,10 @@
     aws_profile: "{{ lookup('env', 'AWS_PROFILE') | default('default', true) }}"
 
 # Try to read credentials from file if not already provided
-- block:
+- when:
+    - aws_access_key is undefined
+    - lookup('env', 'AWS_ACCESS_KEY_ID')|length <= 0
+  block:
     - name: Check if AWS credentials file exists
       stat:
         path: "{{ aws_credentials_path }}"
@@ -20,9 +23,6 @@
         _file_session_token: "{{ lookup('ini', 'aws_session_token', section=aws_profile, file=aws_credentials_path, errors='ignore') | default('', true) }}"
       when: aws_creds_file.stat.exists
       no_log: true
-  when:
-    - aws_access_key is undefined
-    - lookup('env', 'AWS_ACCESS_KEY_ID')|length <= 0
 
 # Prompt for credentials if still not available
 - pause:
@@ -47,25 +47,30 @@
     - _file_secret_key is undefined or _file_secret_key|length <= 0
 
 # Set final credentials with proper precedence
+# Note: The 'true' parameter in default() is required for Ansible 12+ compatibility.
+# Without it, empty strings from env lookups stop the default chain since they're
+# "defined" values, not "undefined". The 'true' makes default() also trigger on
+# falsy values (empty strings, None).
 - set_fact:
     access_key: >-
       {{ aws_access_key
-         | default(lookup('env', 'AWS_ACCESS_KEY_ID'))
-         | default(_file_access_key)
-         | default(_aws_access_key.user_input | default(None)) }}
+         | default(lookup('env', 'AWS_ACCESS_KEY_ID'), true)
+         | default(_file_access_key, true)
+         | default(_aws_access_key.user_input | default(None), true) }}
     secret_key: >-
       {{ aws_secret_key
-         | default(lookup('env', 'AWS_SECRET_ACCESS_KEY'))
-         | default(_file_secret_key)
-         | default(_aws_secret_key.user_input | default(None)) }}
+         | default(lookup('env', 'AWS_SECRET_ACCESS_KEY'), true)
+         | default(_file_secret_key, true)
+         | default(_aws_secret_key.user_input | default(None), true) }}
     session_token: >-
       {{ aws_session_token
-         | default(lookup('env', 'AWS_SESSION_TOKEN'))
-         | default(_file_session_token)
+         | default(lookup('env', 'AWS_SESSION_TOKEN'), true)
+         | default(_file_session_token, true)
          | default('') }}
   no_log: true
 
-- block:
+- when: region is undefined
+  block:
     - name: Get regions
       aws_region_info:
         aws_access_key: "{{ access_key }}"
@@ -97,15 +102,18 @@
           Enter the number of your desired region
           [{{ default_region }}]
       register: _algo_region
-  when: region is undefined
 
 - name: Set algo_region and stack_name facts
   set_fact:
     algo_region: >-
-      {%- if region is defined -%}{{ region }}{%- elif _algo_region.user_input -%}{{ aws_regions[_algo_region.user_input | int - 1]['region_name'] }}{%- else -%}{{ aws_regions[default_region | int - 1]['region_name'] }}{%- endif -%}
+      {%- if region is defined -%}{{ region }}{%-
+      elif _algo_region.user_input -%}{{ aws_regions[_algo_region.user_input | int - 1]['region_name'] }}{%-
+      else -%}{{ aws_regions[default_region | int - 1]['region_name'] }}{%-
+      endif -%}
     stack_name: "{{ algo_server_name | replace('.', '-') }}"
 
-- block:
+- when: cloud_providers.ec2.use_existing_eip
+  block:
     - name: Get existing available Elastic IPs
       ec2_eip_info:
         aws_access_key: "{{ access_key }}"
@@ -130,4 +138,3 @@
 
     - set_fact:
         existing_eip: "{{ available_eip_addresses[_use_existing_eip.user_input | int - 1]['allocation_id'] }}"
-  when: cloud_providers.ec2.use_existing_eip

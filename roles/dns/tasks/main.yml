@@ -1,7 +1,7 @@
 ---
-- name: Include tasks for Ubuntu
+- name: Include tasks for Debian/Ubuntu
   include_tasks: ubuntu.yml
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  when: is_debian_based | bool
 
 - name: dnscrypt-proxy ip-blacklist configured
   template:
@@ -21,17 +21,17 @@
 
 - name: Include DNS adblocking tasks
   import_tasks: dns_adblocking.yml
-  when: algo_dns_adblocking
+  when: algo_dns_adblocking | bool
 
 - meta: flush_handlers
 
-- name: Ubuntu | Ensure dnscrypt-proxy socket is enabled and started
+- name: Ensure dnscrypt-proxy socket is enabled and started
   systemd:
     name: dnscrypt-proxy.socket
     enabled: true
     state: started
     daemon_reload: true
-  when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
+  when: uses_systemd_socket | bool
 
 - name: dnscrypt-proxy enabled and started
   service:
